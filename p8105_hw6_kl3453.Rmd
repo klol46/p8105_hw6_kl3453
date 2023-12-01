@@ -140,3 +140,89 @@ citystate_OR_CI_hom[order(citystate_OR_CI_hom$OR),] |>
 ```
 
 # Problem 2
+
+```{r}
+# Central Park Weather Data
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2022-01-01",
+    date_max = "2022-12-31") |>
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) |>
+  select(name, id, everything())
+
+```
+
+The boostrap is helpful when you’d like to perform inference for a parameter / value / summary that doesn’t have an easy-to-write-down distribution in the usual repeated sampling framework. 
+
+We’ll focus on a simple linear regression with _tmax_ as the response with _tmin_ and _prcp_ as the predictors, and are interested in the distribution of two quantities estimated from these data: r^2 + log(b1 * b2)
+
+## Bootstrap
+
+Use 5000 bootstrap samples and, for each bootstrap sample, produce estimates of these two quantities. Plot the distribution of your estimates, and describe these in words. Using the 5000 bootstrap estimates, identify the 2.5% and 97.5% quantiles to provide a 95% confidence interval for r̂ 2 and log(β̂ 0∗β̂ 1).
+
+
+```{r}
+weather_boostrap = 
+  weather_df |> 
+  select(-name, -id) |> 
+  modelr::bootstrap(n = 5000) |> 
+  mutate(
+    models = map(strap, \(df) lm(tmax ~ tmin + prcp, data = df) ),
+    results_tidy = map(models, broom::tidy),
+    results_glance = map(models, broom::glance)) |> 
+  select(-model) |> 
+  unnest(results_tidy)
+```
+
+__r^2 Estimate + Conf. Interval__
+```{r}
+#r^2 estimate plot + CI
+r_squared =
+  weather_boostrap |> 
+  group_by(.id) |>
+  select(r.squared) |> 
+  distinct()
+
+zval = qnorm(.975)
+r_mean = mean(r_squared$r.squared)
+r_sd = sd(r_squared$r.squared)
+count = nrow(r_squared)
+me = zval * (r_sd/sqrt(count))
+```
+
+  - r^2 Mean: `r r_mean`
+  - r^2 95% CI: (`r r_mean - me`, `r r_mean + me`)
+
+__r^2 plot__
+```{r}
+r_squared |> 
+  ggplot(aes(x = r.squared)) +
+  geom_density()
+```
+
+__log(beta1 * beta2)__
+```{r}
+log_b1_b2_df = 
+  weather_boostrap |> 
+  select(.id, term, estimate) |> 
+  pivot_wider(
+    names_from = term,
+    values_from = estimate
+  ) |> 
+  mutate(log_est = log(abs(tmin * prcp)))
+```
+
+__Plot log(b1 * b2)__
+```{r}
+log_b1_b2_df |> 
+  ggplot(aes(x = log_est)) +
+  geom_density()
+  
+```
+
+# Problem 3
