@@ -6,8 +6,11 @@ output: github_document
 ---
 
 ```{r include = FALSE}
-library(tidyverse)
 library(rvest)
+library(tidyverse)
+library(modelr)
+library(mgcv)
+
 ```
 
 # Problem 1
@@ -226,3 +229,74 @@ log_b1_b2_df |>
 ```
 
 # Problem 3
+
+In this problem, you will analyze data gathered to understand the effects of several variables on a child’s birthweight. This dataset, available here, consists of roughly 4000 children and includes the following variables:
+
+Load and clean the data for regression analysis (i.e. convert numeric to factor where appropriate, check for missing data, etc.).
+
+__Load__
+```{r}
+raw_birthweight_data =
+  read_csv("./data/birthweight.csv") |> 
+  janitor::clean_names()
+```
+
+__Clean__
+```{r}
+birthweight_df = 
+  raw_birthweight_data |> 
+  
+  #convert frace to categorical var, convert to factor
+  mutate(frace = factor(frace)) |> 
+  
+  #convert mrace to categorical var, convert to factor
+  mutate(mrace = factor(mrace))
+```
+
+
+
+## Propose + Compare your Models
+
+__Proposed Model__ 
+
+  - BirthWeight = legnth, gestational age, sex, mrace, frace 
+    - Hypothesis: race of mother/father may act as social factors that may significantly affect birthweight.
+
+```{r}
+proposed_model = lm(bwt ~ blength + gaweeks + babysex + mrace + frace, data = birthweight_df)
+```
+
+__Main Effect Model__
+
+  - BirthWeight = Length at Birth + Gestational Age
+```{r}
+main_model = lm(bwt ~ blength + gaweeks, data = birthweight_df) 
+```
+
+__Three Way Model__
+
+  - BirthWeight = Head Circumference, Length, Baby Sex, and All Interactions
+  
+```{r}
+interaction_model = lm(bwt ~ blength + bhead + babysex + blength:bhead + blength:babysex + bhead:babysex + bhead:blength:babysex, data = birthweight_df)
+```
+
+### Comparing Models
+
+__Create Test/Training Data__
+
+```{r}
+cv_bwt_df = 
+  crossv_mc(birthweight_df, 100) |> 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)) |> 
+  mutate(
+      prop_mod = map(train, \(df) lm(bwt ~ blength + gaweeks + babysex + mrace + frace, data = df),
+      
+  )) |> 
+  
+    
+
+```
+
