@@ -17,7 +17,7 @@ library(mgcv)
 
 The Washington Post has gathered data on homicides in 50 large U.S. cities and made the data available through a GitHub repository here. You can read their accompanying article here.
 
-```{r }
+```{r, echo = FALSE}
 raw_homicide_data =
   read_csv("./data/homicide-data.csv") |> 
   janitor::clean_names()
@@ -26,8 +26,6 @@ raw_homicide_data =
 __Data Process__
 
 Create a city_state variable (e.g. “Baltimore, MD”), and a binary variable indicating whether the homicide is solved.
-
-Omit cities Dallas, TX; Phoenix, AZ; and Kansas City, MO – these don’t report victim race. Also omit Tulsa, AL – this is a data entry mistake. For this problem, limit your analysis those for whom victim_race is white or black. Be sure that victim_age is numeric.
 
   - Omit: Dallas, TX, Phoeniz, AZ, Kansas City, MO, and Tulsa Al
   - Include only when victim_race == "white" or "black"
@@ -55,10 +53,10 @@ processs_homicide_data =
 to fit a _logistic regression_ with resolved vs unresolved as the outcome and victim age, sex and race as predictors. 
 
   - Outcome: Resolved vs. Unresolved (1 or 0 Binary)
-  - PRedictors
-      - Age: Continuous
-      - Sex: Binary
-      - Race: Binary 
+  - Predictors
+      - Age (Continuous)
+      - Sex (Binary)
+      - Race (Binary)
 
 __Resolved vs. Unresolved (Binary Var)__
 ```{r}
@@ -83,12 +81,14 @@ __Tidy__
 
 Save the output of glm as an R object; apply the broom::tidy to this object; 
 
-```{r}
+```{r, results = "hide"}
 #Extract all parameter estimates from logistic regression
 homicide_param_est = 
   homicide_logistic |> 
   broom::tidy() |> 
-  mutate(OR = exp(estimate), OR_CI = exp(confint(homicide_logistic))) |>
+  
+  #Calculating OR from the log(OR) and OR_CI
+  mutate(OR = exp(estimate), OR_CI = exp(confint.default(homicide_logistic))) |>
   select(term, log_OR = estimate, OR, OR_CI, p.value)
 ```
 
@@ -100,6 +100,8 @@ Obtain the estimate and confidence interval of the adjusted odds ratio for solvi
 ```{r}
 homicide_param_est_male_female = 
   homicide_param_est |> 
+  
+  #Filter on parameter  estimate of the binary variable Male (1 = Male, 0 = Female)
   filter(grepl("victim_sexMale", term))
 ```
 
@@ -112,20 +114,25 @@ and extract the adjusted odds ratio (and CI) for solving homicides comparing mal
 
 __Broom function__
 ```{r}
+#This is inorder to allow "tidy" to ouput confidence intervals into it's output, of which is default set to FALSE
 broom_conf = function(df) {
   broom::tidy(df, conf.int = TRUE)
 }
 ```
 
-```{r}
+```{r, results = "hide"}
 citystate_OR_CI_hom = 
   resolved_data |> 
+  
+  #Nest on city_state to perform log regression on each city state
   nest(data = -city_state) |> 
   mutate(
     models = map(data, \(df) glm(resolve ~ victim_age + victim_race + victim_sex, data = df, family = binomial())),
     results = map(models, broom_conf)) |> 
   select(-data, -models) |> 
   unnest(results) |> 
+  
+  #calculate OR and confidence interval for OR
   mutate(OR = exp(estimate), lowCI = exp(conf.low), uppCI = exp(conf.high)) |>
   filter(grepl("victim_sexMale", term)) |> 
   select(city_state, OR, lowCI, uppCI)
@@ -135,16 +142,29 @@ citystate_OR_CI_hom =
 Create a plot that shows the estimated ORs and CIs for each city. Organize cities according to estimated OR, and comment on the plot.
 
 ```{r}
+#Order the city_states by Magnitude of Odds Ratio
 citystate_OR_CI_hom[order(citystate_OR_CI_hom$OR),] |>  
-  mutate(city_state = factor(city_state, levels = city_state)) |> 
+  
+  #Order the city_states by their position using factors (for plotting purposes)
+  mutate(city_state = factor(city_state, levels = city_state)) |>
+  
+  #Plot city_state vs. OR
   ggplot(aes(x = city_state, y = OR)) +
+  
+  #Error bars are the confidence intervals
   geom_errorbar(aes(ymin = lowCI, ymax = uppCI))+
+  
+  #flip coordinates to allow easy viewing
   coord_flip()
 ```
 
+From the plot, we can see that half of the cities have an OR confidence interval that includes 1 (Null) which means that for those city_states, we are 95% confident that the odds of resolving as a male is same as the odds of resolving as a female.
+
+The other half of city_states have OR confidence intervales that are below 1 and do not include 1 which means for these city_states, there is 95% confidence that the odds of resolving is lower as a male than female. 
+
 # Problem 2
 
-```{r}
+```{r, echo = FALSE}
 # Central Park Weather Data
 weather_df = 
   rnoaa::meteo_pull_monitors(
@@ -168,35 +188,53 @@ We’ll focus on a simple linear regression with _tmax_ as the response with _tm
 
 Use 5000 bootstrap samples and, for each bootstrap sample, produce estimates of these two quantities. Plot the distribution of your estimates, and describe these in words. Using the 5000 bootstrap estimates, identify the 2.5% and 97.5% quantiles to provide a 95% confidence interval for r̂ 2 and log(β̂ 0∗β̂ 1).
 
-
+__5000 Boostrap Samples__
 ```{r}
 weather_boostrap = 
   weather_df |> 
   select(-name, -id) |> 
+  
+  #bootstrap 5000 samples using dataset
   modelr::bootstrap(n = 5000) |> 
   mutate(
     models = map(strap, \(df) lm(tmax ~ tmin + prcp, data = df) ),
+    
+    #tidy results in order to get log(b1 * b2)
     results_tidy = map(models, broom::tidy),
+    
+    #glance results in order to get r^2 values 
     results_glance = map(models, broom::glance)) |> 
   select(-models) |> 
   unnest(results_tidy)
 ```
 
 __r^2 Estimate + Conf. Interval__
-```{r}
+```{r, results = "hide"}
 #r^2 estimate plot + CI
 r_squared =
   weather_boostrap |> 
+  
+  #Only include, id, term, and results glance
   select(.id, term, results_glance) |> 
+  
+  #unnest glance results in order to extract r^2 values
   unnest(results_glance) |> 
   group_by(.id) |>
   select(r.squared) |> 
+  
+  #since there are multiple terms, the r^2 is duplicated, selected distinct values
   distinct()
 
+#Parameters to estimate confidence intervals
 zval = qnorm(.975)
+
+  #Take mean of all r^2 values
 r_mean = mean(r_squared$r.squared)
+  #estimate sd of all r^2 values
 r_sd = sd(r_squared$r.squared)
+  #record sample size
 count = nrow(r_squared)
+  #calculate marginal error (used to calculate 95% CI)
 me = zval * (r_sd/sqrt(count))
 ```
 
@@ -214,13 +252,35 @@ __log(beta1 * beta2)__
 ```{r}
 log_b1_b2_df = 
   weather_boostrap |> 
+  
+  #select data from tidy
   select(.id, term, estimate) |> 
+  
+  #pivot wider in order to define beta1 * beta2 (creating separate column)
   pivot_wider(
     names_from = term,
     values_from = estimate
   ) |> 
+  
+  #calculate log(b1 * b2) 
   mutate(log_est = log(abs(tmin * prcp)))
+
+#Parameters to estimate confidence intervals
+zval = qnorm(.975)
+
+  #Take mean of all r^2 values
+log_mean = mean(log_b1_b2_df$log_est)
+  #estimate sd of all r^2 values
+log_sd = sd(log_b1_b2_df$log_est)
+  #record sample size
+count = nrow(log_b1_b2_df)
+  #calculate marginal error (used to calculate 95% CI)
+me_log = zval * (log_sd/sqrt(count))
 ```
+
+
+  - log(b1*b2) Mean: `r log_mean`
+  - log(b1*b2) 95% CI: (`r log_mean - me_log`, `r log_mean + me_log`)
 
 __Plot log(b1 * b2)__
 ```{r}
@@ -230,6 +290,8 @@ log_b1_b2_df |>
   
 ```
 
+NOTE: Maybe due to personal misunderstanding but the product of beta1 and beta2 results in negative values for certain values and thus produces a non-real value when performing the log of the product. Thus the density plot is skewed.
+
 # Problem 3
 
 In this problem, you will analyze data gathered to understand the effects of several variables on a child’s birthweight. This dataset, available here, consists of roughly 4000 children and includes the following variables:
@@ -237,7 +299,7 @@ In this problem, you will analyze data gathered to understand the effects of sev
 Load and clean the data for regression analysis (i.e. convert numeric to factor where appropriate, check for missing data, etc.).
 
 __Load__
-```{r}
+```{r, results = "hide"}
 raw_birthweight_data =
   read_csv("./data/birthweight.csv") |> 
   janitor::clean_names()
@@ -262,7 +324,9 @@ birthweight_df =
 __Proposed Model__ 
 
 The proposed model will be a linear regression as the outcome is a continuous variable. 
+  
   - BirthWeight = length, gestational age, sex, mrace, frace 
+    
     - Hypothesis: race of mother/father may act as social factors that may significantly affect birthweight.
 
 ```{r}
@@ -363,3 +427,4 @@ cv_bwt_df |>
   ggplot(aes(x = model, y = rmse)) + geom_violin()
 ```
 
+As we can see, it seems the 3 way model performs slightly better than the main and the proposed model in terms of model fit to the data.
