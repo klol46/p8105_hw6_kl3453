@@ -178,7 +178,7 @@ weather_boostrap =
     models = map(strap, \(df) lm(tmax ~ tmin + prcp, data = df) ),
     results_tidy = map(models, broom::tidy),
     results_glance = map(models, broom::glance)) |> 
-  select(-model) |> 
+  select(-models) |> 
   unnest(results_tidy)
 ```
 
@@ -187,6 +187,8 @@ __r^2 Estimate + Conf. Interval__
 #r^2 estimate plot + CI
 r_squared =
   weather_boostrap |> 
+  select(.id, term, results_glance) |> 
+  unnest(results_glance) |> 
   group_by(.id) |>
   select(r.squared) |> 
   distinct()
@@ -259,12 +261,14 @@ birthweight_df =
 
 __Proposed Model__ 
 
-  - BirthWeight = legnth, gestational age, sex, mrace, frace 
+The proposed model will be a linear regression as the outcome is a continuous variable. 
+  - BirthWeight = length, gestational age, sex, mrace, frace 
     - Hypothesis: race of mother/father may act as social factors that may significantly affect birthweight.
 
 ```{r}
 proposed_model = lm(bwt ~ blength + gaweeks + babysex + mrace + frace, data = birthweight_df)
 ```
+
 
 __Main Effect Model__
 
@@ -281,10 +285,9 @@ __Three Way Model__
 interaction_model = lm(bwt ~ blength + bhead + babysex + blength:bhead + blength:babysex + bhead:babysex + bhead:blength:babysex, data = birthweight_df)
 ```
 
-### Comparing Models
+### Comparing Models: Residuals vs. Predicted
 
 __Create Test/Training Data__
-
 ```{r}
 cv_bwt_df = 
   crossv_mc(birthweight_df, 100) |> 
@@ -292,11 +295,71 @@ cv_bwt_df =
     train = map(train, as_tibble),
     test = map(test, as_tibble)) |> 
   mutate(
-      prop_mod = map(train, \(df) lm(bwt ~ blength + gaweeks + babysex + mrace + frace, data = df),
-      
-  )) |> 
+      prop_mod = map(train, \(df) lm(bwt ~ blength + gaweeks + babysex + mrace + frace, data = df)),
+      main_mod = map(train, \(df) lm(bwt ~ blength + gaweeks, data = df)),
+      inter_mod = map(train, \(df) lm(bwt ~ blength + bhead + babysex + blength:bhead + blength:babysex + bhead:babysex + bhead:blength:babysex, data = df))
+      ) |> 
+  mutate(
+    rmse_prop = map2_dbl(prop_mod, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_main    = map2_dbl(main_mod, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_inter = map2_dbl(inter_mod, test, \(mod, df) rmse(model = mod, data = df)))
   
-    
+```
 
+__Proposed Model: Residuals vs. Predictors__
+
+```{r}
+#Take one test sample + plot the predictoed vs. residuals for each sample.
+cv_bwt_df |> 
+  pull(test) |> 
+  nth(1) |> 
+  as_tibble() |> 
+  add_predictions(proposed_model) |> 
+  add_residuals(proposed_model) |> 
+  ggplot(aes(x = pred, y = resid)) + 
+  geom_point() 
+```
+
+__Main Model: Residuals vs. Predictors__
+
+```{r}
+cv_bwt_df |> 
+  pull(test) |> 
+  nth(1) |> 
+  as_tibble() |> 
+  add_predictions(main_model) |> 
+  add_residuals(main_model) |> 
+  ggplot(aes(x = pred, y = resid)) + 
+  geom_point() 
+```
+
+__3 Way Model: Residuals vs. Predictors__
+
+```{r}
+cv_bwt_df |> 
+  pull(test) |> 
+  nth(1) |> 
+  as_tibble() |> 
+  add_predictions(interaction_model) |> 
+  add_residuals(interaction_model) |> 
+  ggplot(aes(x = pred, y = resid)) + 
+  geom_point() 
+```
+
+By comparing the models based on residuals and predictors, it seems they all fit quite similarly.
+
+- In more detail, it seems that the 3 way model fits this particular test sample a bit better as the scatterplot is more tightly comppacted around the resid = 0 line.
+
+### Comparing Models: MSE
+```{r}
+cv_bwt_df |> 
+  select(starts_with("rmse")) |> 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") |> 
+  mutate(model = fct_inorder(model)) |> 
+  ggplot(aes(x = model, y = rmse)) + geom_violin()
 ```
 
